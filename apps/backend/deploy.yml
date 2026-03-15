@@ -15,7 +15,7 @@ spec:
         app: backend
     spec:
       containers:
-      - name: backend
-        image: 654654554686.dkr.ecr.us-east-1.amazonaws.com/workshop/production/backend
-        ports:
-        - containerPort: 80
+        - name: backend
+          image: 196338543880.dkr.ecr.us-east-1.amazonaws.com/workshop-backend
+          ports:
+            - containerPort: 80
