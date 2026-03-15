@@ -1,0 +1,10 @@
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = {
+    Name = var.vpc.nat_gateway
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}

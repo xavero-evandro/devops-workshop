@@ -14,7 +14,6 @@ terraform {
   }
 }
 
-# Configure the AWS Provider
 provider "aws" {
   region = var.assume_role.region
 
