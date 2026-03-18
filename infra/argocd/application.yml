@@ -8,10 +8,11 @@ spec:
   source:
     repoURL: https://github.com/xavero-evandro/devops-workshop
     targetRevision: HEAD
-    path: .
+    path: apps/overlays/local-ingress
   destination:
     server: https://kubernetes.default.svc
     namespace: default
   syncPolicy:
     automated:
+      prune: true
       selfHeal: true
