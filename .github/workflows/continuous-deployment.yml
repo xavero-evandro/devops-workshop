@@ -1,99 +1,72 @@
 name: Continuous Deployment
+
 on:
-  workflow_dispatch:
   push:
     branches:
+      - dev
+      - staging
       - main
-env:
-  BACKEND_REPOSITORY: workshop-backend
-  FRONTEND_REPOSITORY: workshop-frontend
-  IMAGE_TAG: ${{ github.sha }}
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: us-east-1
+  BACKEND_REPOSITORY: workshop-backend
+  FRONTEND_REPOSITORY: workshop-frontend
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
-  backend:
-    name: Deploy backend
+  build-and-push:
+    name: Build and push images
     runs-on: ubuntu-latest
+    outputs:
+      registry: ${{ steps.login-ecr.outputs.registry }}
+      image_tag: ${{ env.IMAGE_TAG }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout app repository
+        uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.0.0
         with:
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
           role-to-assume: arn:aws:iam::196338543880:role/workshop-github-role
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push docker image to Amazon ECR
-        run: |
-          docker build -f ./apps/backend/YoutubeLiveApp/Dockerfile \
-              -t $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG \
-              ./apps/backend/YoutubeLiveApp
-          docker push $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG
+      - name: Build and push backend image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -f ./apps/backend/YoutubeLiveApp/Dockerfile \
+            -t $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG \
+            ./apps/backend/YoutubeLiveApp
+          docker push $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG
 
-      - uses: actions/checkout@v6
-        with:
-          repository: "xavero-evandro/devops-workshop"
-          token: ${{ secrets.PAT }}
-
-      # - name: Kustomize Edit
-      #   env:
-      #       REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      #   run: |
-      #       kustomize edit set image $REGISTRY/$BACKEND_REPOSITORY=$REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG
-      #       git config user.name "github-actions[bot]"
-      #       git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      #       git add ./kustomization.yml
-      #       git commit -m "[BOT] Changing image to $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG"
-      #       git push
-
-  frontend:
-    name: Deploy frontend
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6.0.0
-        with:
-          aws-region: us-east-1
-          role-to-assume: arn:aws:iam::196338543880:role/workshop-github-role
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push docker image to Amazon ECR
+      - name: Build and push frontend image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker build -f ./apps/frontend/youtube-live-app/Dockerfile \
-              -t $REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG \
-              ./apps/frontend/youtube-live-app
+            -t $REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG \
+            ./apps/frontend/youtube-live-app
           docker push $REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG
 
-      - uses: actions/checkout@v6
-        with:
-          repository: "xavero-evandro/devops-workshop"
-          token: ${{ secrets.PAT }}
-
-      # - name: Kustomize Edit
-      #   env:
-      #       REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      #   run: |
-      #       kustomize edit set image $REGISTRY/$FRONTEND_REPOSITORY=$REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG
-      #       git config user.name "github-actions[bot]"
-      #       git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      #       git add ./kustomization.yml
-      #       git commit -m "[BOT] Changing image to $REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG"
-      #       git push
+  promote-gitops:
+    name: Promote image tags to GitOps (${{ github.ref_name == 'main' && 'prod' || github.ref_name }})
+    needs: build-and-push
+    uses: ./.github/workflows/promote-gitops.yml
+    with:
+      gitops_repository: xavero-evandro/devops-workshop-gitops
+      gitops_overlay_path: ${{ github.ref_name == 'dev' && 'apps/workshop/overlays/dev/kustomization.yml' || github.ref_name == 'staging' && 'apps/workshop/overlays/staging/kustomization.yml' || 'apps/workshop/overlays/prod/kustomization.yml' }}
+      backend_repository: workshop-backend
+      frontend_repository: workshop-frontend
+      registry: ${{ needs.build-and-push.outputs.registry }}
+      image_tag: ${{ needs.build-and-push.outputs.image_tag }}
+      deployment_environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+    secrets: inherit

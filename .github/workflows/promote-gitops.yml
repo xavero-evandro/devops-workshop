@@ -1,0 +1,113 @@
+name: Promote GitOps Overlay
+
+on:
+  workflow_call:
+    inputs:
+      gitops_repository:
+        description: GitOps repository in owner/name format
+        required: true
+        type: string
+      gitops_overlay_path:
+        description: Path to overlay kustomization.yml inside GitOps repository
+        required: true
+        type: string
+      backend_repository:
+        description: Backend ECR repository name
+        required: true
+        type: string
+      frontend_repository:
+        description: Frontend ECR repository name
+        required: true
+        type: string
+      registry:
+        description: Container registry host (for example 123456789012.dkr.ecr.us-east-1.amazonaws.com)
+        required: true
+        type: string
+      image_tag:
+        description: Image tag to promote
+        required: true
+        type: string
+      deployment_environment:
+        description: GitHub Environment name used for approval gates
+        required: false
+        default: dev
+        type: string
+  workflow_dispatch:
+    inputs:
+      gitops_repository:
+        description: GitOps repository in owner/name format
+        required: true
+        default: xavero-evandro/devops-workshop-gitops
+        type: string
+      gitops_overlay_path:
+        description: Path to overlay kustomization.yml inside GitOps repository
+        required: true
+        default: apps/workshop/overlays/dev/kustomization.yml
+        type: string
+      backend_repository:
+        description: Backend ECR repository name
+        required: true
+        default: workshop-backend
+        type: string
+      frontend_repository:
+        description: Frontend ECR repository name
+        required: true
+        default: workshop-frontend
+        type: string
+      registry:
+        description: Container registry host
+        required: true
+        default: 196338543880.dkr.ecr.us-east-1.amazonaws.com
+        type: string
+      image_tag:
+        description: Image tag to promote
+        required: true
+        type: string
+      deployment_environment:
+        description: GitHub Environment name used for approval gates
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Update image tags in GitOps overlay
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deployment_environment }}
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gitops_repository }}
+          token: ${{ secrets.PAT }}
+          path: gitops
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Update image tags
+        run: |
+          OVERLAY_DIR="gitops/$(dirname "${{ inputs.gitops_overlay_path }}")"
+          pushd "$OVERLAY_DIR"
+          kustomize edit set image \
+            "${{ inputs.registry }}/${{ inputs.backend_repository }}=${{ inputs.registry }}/${{ inputs.backend_repository }}:${{ inputs.image_tag }}"
+          kustomize edit set image \
+            "${{ inputs.registry }}/${{ inputs.frontend_repository }}=${{ inputs.registry }}/${{ inputs.frontend_repository }}:${{ inputs.image_tag }}"
+          popd
+
+      - name: Commit and push GitOps changes
+        run: |
+          cd gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${{ inputs.gitops_overlay_path }}"
+          if git diff --staged --quiet; then
+            echo "No GitOps manifest changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(gitops): promote images to ${{ inputs.image_tag }}"
+          git push origin main
